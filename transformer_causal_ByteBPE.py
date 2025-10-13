@@ -140,7 +140,7 @@ class TinyLM(nn.Module):
             else:
                 probs = F.softmax(logits, dim=-1)
             next_token = torch.multinomial(probs, num_samples=1)
-        idx = torch.cat([idx, next_token], dim=1)
+            idx = torch.cat([idx, next_token], dim=1)
         return(idx)
 
 #train
@@ -172,7 +172,7 @@ for epoch in range(1, EPOCHS+1):
         print(f"epoch {epoch} train_loss {loss.item():.4f} val_loss {vloss.item():.4f}")
         start = "Bonjour"
         idx = torch.tensor([encode(start)], dtype=torch.long).to(device)
-        gen = model.generate(idx, max_new_tokens=50)[0].tolist()
+        gen = model.generate(idx, max_new_tokens=10)[0].tolist()
         print(" ->", decode(gen))
         # checkpointing & early stopping
         if vloss.item() < best_val:

@@ -20,3 +20,6 @@ The idea is to train on a large french dataset a model to generate 'ok' french s
 Then finetune the model on a smaller dataset containing sentences used by a character in order to mimic them.
 
 The dataset files are not included in this repo.
+
+## state of the repo
+Right now, the **finetune.py** code does not exist. I'm trying to achieve satisfying results (in term of sentence construction). Because the training in **transformer_causal_ByteBpe.py** is done from scratch, it needs some finetuning and still need (a lot) of improvement. tbc

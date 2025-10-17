@@ -4,17 +4,21 @@ import torch.nn as nn
 import torch.nn.functional as F
 from load_data import text
 from tokenizers import ByteLevelBPETokenizer
+from torch.utils.data import Dataset, DataLoader
+
+from tqdm import tqdm
+import random
 
 
 # hyperparameters
 device = "cuda" if torch.cuda.is_available() else "cpu"
 SEQ_LEN = 128  #context
 BATCH = 8
-EMBD = 256 #embeding size
-N_LAYERS = 8
+EMBD = 512 #embeding size
+N_LAYERS = 12
 N_HEAD = 16
-LR = 3e-4
-EPOCHS = 1000 #epochs
+LR = 3e-3
+EPOCHS = 100
 PRINT_EVERY = EPOCHS//10
 
 # dataset, toy one for testing (few sentences)
@@ -142,8 +146,22 @@ class TinyLM(nn.Module):
             next_token = torch.multinomial(probs, num_samples=1)
             idx = torch.cat([idx, next_token], dim=1)
         return(idx)
+    
+def batchify(data, batch_size, device):
+    n = data.size(0) // batch_size * batch_size
+    data = data[:n]
+    data = data.view(batch_size, -1).t().contiguous()
+    return data.to(device)
+
+def get_batch_from_stream(source, i, seq_len):
+    seq_len = min(seq_len, source.size(0) - 1 - i)
+    x = source[i:i+seq_len]
+    y = source[i+1:i+1+seq_len]
+    return x.t().contiguous(), y.t().contiguous()
 
 #train
+train_stream = batchify(train_data, BATCH, device)
+steps_per_epoch = (train_stream.size(0) - 1) // SEQ_LEN
 model = TinyLM(vocab_size=vocab_size, seq_len=SEQ_LEN).to(device)
 optimizer = torch.optim.AdamW(model.parameters(), lr=LR, weight_decay=0.01)
 from torch.optim.lr_scheduler import CosineAnnealingLR
@@ -156,20 +174,32 @@ no_improve = 0
 print(f"Vocab size: {vocab_size}, device: {device}")
 for epoch in range(1, EPOCHS+1):
     model.train()
-    xb, yb = get_batch("train")
-    logits, loss = model(xb, yb)
-    optimizer.zero_grad()
-    loss.backward()
-    torch.nn.utils.clip_grad_norm_(model.parameters(), 1.0)
-    optimizer.step()
+    epoch_loss = 0
+    offset = random.randint(0, SEQ_LEN - 1)
+    max_steps = (train_stream.size(0) - 1 - offset) // SEQ_LEN
+    with tqdm(range(max_steps), desc=f"Epoch {epoch}/{EPOCHS}", unit="batch") as pbar:
+        for step in pbar:
+            i = offset + step * SEQ_LEN
+            xb, yb = get_batch_from_stream(train_stream, i, SEQ_LEN)  # already on device
+            logits, loss = model(xb, yb)
+            optimizer.zero_grad()
+            loss.backward()
+            #gradient clipping
+            torch.nn.utils.clip_grad_norm_(model.parameters(), 1.0)
+            optimizer.step()
 
+            epoch_loss += loss.item()
+            pbar.set_postfix({'batch_loss': f"{loss.item():.4f}",
+                               'lr': f"{optimizer.param_groups[0]['lr']:.2e}"})
+
+    avg_train_loss = epoch_loss / max_steps if max_steps > 0 else float("nan")
     if epoch % PRINT_EVERY == 0 or epoch==1:
         # compute val loss
         model.eval()
         with torch.no_grad():
             vx, vy = get_batch("val")
             _, vloss = model(vx, vy)
-        print(f"epoch {epoch} train_loss {loss.item():.4f} val_loss {vloss.item():.4f}")
+        print(f"epoch {epoch} train_loss {avg_train_loss:.4f} val_loss {vloss.item():.4f}")
         start = "Bonjour"
         idx = torch.tensor([encode(start)], dtype=torch.long).to(device)
         gen = model.generate(idx, max_new_tokens=10)[0].tolist()
@@ -180,7 +210,7 @@ for epoch in range(1, EPOCHS+1):
             torch.save(model.state_dict(), "best_tinylm.pt")
             no_improve = 0
         else:
-            no_improve += 1
+            no_improve += PRINT_EVERY
             if no_improve >= patience:
                 print("Early stopping (no improvement)")
                 break

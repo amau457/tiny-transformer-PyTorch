@@ -1,4 +1,4 @@
-with open("data.txt", "r", encoding="utf-8") as f:
+with open("data_clean.txt", "r", encoding="utf-8") as f:
     text = f.read()
 
 # cleanup
